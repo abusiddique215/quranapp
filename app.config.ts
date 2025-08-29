@@ -2,8 +2,8 @@ import { ExpoConfig, ConfigContext } from 'expo/config';
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
-  name: 'Quran App',
-  slug: 'quran-app-fixed',
+  name: 'Quran Reader',
+  slug: 'quran-reader-app',
   scheme: 'quranapp',
   version: '0.2.0',
   orientation: 'portrait',
@@ -19,7 +19,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   assetBundlePatterns: ['**/*'],
   ios: {
     supportsTablet: true,
-    bundleIdentifier: 'com.quranapp.fixed',
+    bundleIdentifier: 'com.abusiddique.quranreader',
   },
   android: {
     adaptiveIcon: {
@@ -45,9 +45,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     apiBaseUrl: process.env.API_BASE_URL || 'https://api.quran.com/api/v4',
     router: {
       origin: false,
-    },
-    eas: { 
-      projectId: '00000000-0000-0000-0000-000000000000' 
     },
   },
 });

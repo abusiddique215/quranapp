@@ -387,18 +387,18 @@ class QuranDatabaseService {
   }
 
   /**
-   * Import complete Quran data from AlQuran.cloud API
-   * This populates all 114 surahs with 6,236 verses
+   * Import complete Quran data from AlQuran.cloud API with transliteration
+   * This populates all 114 surahs with 6,236 verses including transliteration data
    */
   private async importCompleteQuranData(): Promise<void> {
     if (!this.db) return;
 
-    console.log('[QuranDB] Importing complete Quran data...');
+    console.log('[QuranDB] Importing complete Quran data with transliteration...');
 
     try {
       // Populate all 114 surahs
       for (let surahNumber = 1; surahNumber <= 114; surahNumber++) {
-        console.log(`[QuranDB] Importing surah ${surahNumber}/114...`);
+        console.log(`[QuranDB] Importing surah ${surahNumber}/114 with transliteration...`);
         
         try {
           // Fetch surah data from API
@@ -414,6 +414,31 @@ class QuranDatabaseService {
 
           const arabicData = data.data[0];
           const englishData = data.data[1];
+
+          // Try to fetch transliteration data (using same logic as API client)
+          let transliterationData: any = null;
+          const possibleEndpoints = [
+            `https://api.alquran.cloud/v1/surah/${surahNumber}/en.transliteration`,
+            `https://api.alquran.cloud/v1/surah/${surahNumber}/transliteration.en.transliteration`,
+            `https://api.alquran.cloud/v1/surah/${surahNumber}/ar.transliteration`,
+          ];
+
+          console.log(`[QuranDB] Attempting to fetch transliteration for surah ${surahNumber}...`);
+          for (const endpoint of possibleEndpoints) {
+            try {
+              const translitResponse = await fetch(endpoint);
+              if (translitResponse.ok) {
+                const translitJson = await translitResponse.json();
+                if (translitJson?.data?.ayahs) {
+                  transliterationData = translitJson.data;
+                  console.log(`[QuranDB] Transliteration found for surah ${surahNumber} from ${endpoint}`);
+                  break;
+                }
+              }
+            } catch (e) {
+              console.log(`[QuranDB] Transliteration endpoint ${endpoint} failed, trying next...`);
+            }
+          }
 
           // Insert surah metadata
           await this.db.execute(`
@@ -433,10 +458,19 @@ class QuranDatabaseService {
             arabicData.englishNameTranslation
           ]);
 
-          // Insert all verses for this surah
+          // Insert all verses for this surah with transliteration
           for (let i = 0; i < arabicData.ayahs.length; i++) {
             const arabicAyah = arabicData.ayahs[i];
             const englishAyah = englishData.ayahs[i];
+            
+            // Get transliteration for this verse
+            let transliterationText = '';
+            if (transliterationData?.ayahs?.[i]?.text) {
+              transliterationText = transliterationData.ayahs[i].text;
+            } else {
+              // Fall back to basic transliteration generation
+              transliterationText = this.generateBasicTransliteration(arabicAyah.text);
+            }
 
             await this.db.execute(`
               INSERT OR REPLACE INTO verses 
@@ -447,14 +481,18 @@ class QuranDatabaseService {
               arabicAyah.numberInSurah,
               arabicAyah.text,
               englishAyah.text,
-              '', // Transliteration not available from this API
+              transliterationText, // Now includes actual transliteration data
               arabicAyah.juz,
               arabicAyah.page
             ]);
           }
 
+          // Log transliteration success
+          const translitMethod = transliterationData ? 'API' : 'generated';
+          console.log(`[QuranDB] Surah ${surahNumber} imported with ${translitMethod} transliteration`);
+
           // Small delay to avoid overwhelming the API
-          await new Promise(resolve => setTimeout(resolve, 100));
+          await new Promise(resolve => setTimeout(resolve, 150)); // Slightly longer delay for transliteration requests
 
         } catch (surahError) {
           console.error(`[QuranDB] Failed to import surah ${surahNumber}:`, surahError);
@@ -463,12 +501,50 @@ class QuranDatabaseService {
         }
       }
 
-      console.log('[QuranDB] Complete Quran data import finished');
+      console.log('[QuranDB] Complete Quran data import with transliteration finished');
 
     } catch (error) {
       console.error('[QuranDB] Failed to import complete Quran data:', error);
       throw error;
     }
+  }
+
+  /**
+   * Generate basic transliteration for Arabic text
+   * Used as fallback when API transliteration is not available
+   */
+  private generateBasicTransliteration(arabicText: string): string {
+    if (!arabicText) return '';
+    
+    // Basic transliteration mapping for common Arabic letters
+    const transliterationMap: { [key: string]: string } = {
+      'ا': 'a', 'أ': 'a', 'إ': 'i', 'آ': 'aa',
+      'ب': 'b', 'ت': 't', 'ث': 'th', 'ج': 'j',
+      'ح': 'h', 'خ': 'kh', 'د': 'd', 'ذ': 'dh',
+      'ر': 'r', 'ز': 'z', 'س': 's', 'ش': 'sh',
+      'ص': 's', 'ض': 'd', 'ط': 't', 'ظ': 'z',
+      'ع': "'", 'غ': 'gh', 'ف': 'f', 'ق': 'q',
+      'ك': 'k', 'ل': 'l', 'م': 'm', 'ن': 'n',
+      'ه': 'h', 'و': 'w', 'ي': 'y', 'ى': 'a',
+      'ة': 'h', 'ؤ': 'u', 'ئ': 'i', 'ء': "'",
+      // Vowel marks (diacritics)
+      'َ': 'a', 'ِ': 'i', 'ُ': 'u', 'ً': 'an',
+      'ٍ': 'in', 'ٌ': 'un', 'ْ': '', 'ّ': '',
+      'ۡ': '', 'ٰ': 'aa', 'ۢ': '', 'ۣ': ''
+    };
+    
+    let result = '';
+    for (const char of arabicText) {
+      if (transliterationMap[char]) {
+        result += transliterationMap[char];
+      } else if (char === ' ') {
+        result += ' ';
+      }
+      // Skip unknown characters (numbers, punctuation, etc.)
+    }
+    
+    // Clean up multiple spaces and trim
+    return result.replace(/\s+/g, ' ').trim().toLowerCase();
   }
 
   /**

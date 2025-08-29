@@ -1,7 +1,8 @@
 {
   "expo": {
-    "name": "quran-app-fixed",
-    "slug": "quran-app-fixed",
+    "name": "Quran Reader",
+    "slug": "quran-reader-app",
+    "owner": "abu.siddique215",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -13,7 +14,9 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.abusiddique.quranreader",
+      "buildNumber": "1"
     },
     "android": {
       "adaptiveIcon": {
@@ -24,6 +27,16 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "clerkPublishableKey": "pk_test_placeholder",
+      "apiBaseUrl": "https://api.quran.com/api/v4",
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "fd47a706-db4f-4e1a-9328-78fbaf662022"
+      }
     }
   }
 }
