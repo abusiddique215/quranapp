@@ -5,7 +5,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   name: 'Quran Reader',
   slug: 'quran-reader-app',
   scheme: 'quranapp',
-  version: '0.2.0',
+  version: '1.0.0',
   orientation: 'portrait',
   icon: './assets/icon.png',
   splash: {

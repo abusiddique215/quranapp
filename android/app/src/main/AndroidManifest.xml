@@ -25,7 +25,7 @@
         <category android:name="android.intent.category.DEFAULT"/>
         <category android:name="android.intent.category.BROWSABLE"/>
         <data android:scheme="quranapp"/>
-        <data android:scheme="exp+quran-app-fixed"/>
+        <data android:scheme="exp+quran-reader-app"/>
       </intent-filter>
     </activity>
   </application>
