@@ -1,27 +1,27 @@
-const { getDefaultConfig } = require('expo/metro-config');
-const { mergeConfig } = require('metro-config');
+const { getDefaultConfig } = require('@expo/metro-config');
 const path = require('path');
 
-const defaultConfig = getDefaultConfig(__dirname);
+/** @type {import('expo/metro-config').MetroConfig} */
+const config = getDefaultConfig(__dirname);
 
-const customConfig = {
-  resolver: {
-    alias: {
-      ...(defaultConfig.resolver?.alias ?? {}),
-      app: path.resolve(__dirname, 'app'),
-      '@': path.resolve(__dirname, 'src'),
-    },
-    sourceExts: [...(defaultConfig.resolver?.sourceExts ?? []), 'cjs'],
+config.resolver = {
+  ...config.resolver,
+  alias: {
+    ...(config.resolver?.alias ?? {}),
+    app: path.resolve(__dirname, 'app'),
+    '@': path.resolve(__dirname, 'src'),
   },
-  transformer: {
-    ...defaultConfig.transformer,
-    minifierConfig: {
+  sourceExts: [...(config.resolver?.sourceExts ?? []), 'cjs'],
+};
+
+config.transformer = {
+  ...config.transformer,
+  minifierConfig: {
+    keep_fnames: true,
+    mangle: {
       keep_fnames: true,
-      mangle: {
-        keep_fnames: true,
-      },
     },
   },
 };
 
-module.exports = mergeConfig(defaultConfig, customConfig);
+module.exports = config;
