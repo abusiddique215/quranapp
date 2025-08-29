@@ -1,27 +1,27 @@
-const { getDefaultConfig } = require('@expo/metro-config');
+const { getDefaultConfig } = require('expo/metro-config');
+const { mergeConfig } = require('metro-config');
 const path = require('path');
 
-const config = getDefaultConfig(__dirname);
+const defaultConfig = getDefaultConfig(__dirname);
 
-// Ensure proper resolution of the app directory
-config.resolver.alias = {
-  ...config.resolver.alias,
-  'app': path.resolve(__dirname, 'app'),
-  '@': path.resolve(__dirname, 'src'),
-};
-
-// Add support for resolving additional extensions
-config.resolver.sourceExts = [...config.resolver.sourceExts, 'cjs'];
-
-// Improve source map generation
-config.transformer = {
-  ...config.transformer,
-  minifierConfig: {
-    keep_fnames: true,
-    mangle: {
+const customConfig = {
+  resolver: {
+    alias: {
+      ...(defaultConfig.resolver?.alias ?? {}),
+      app: path.resolve(__dirname, 'app'),
+      '@': path.resolve(__dirname, 'src'),
+    },
+    sourceExts: [...(defaultConfig.resolver?.sourceExts ?? []), 'cjs'],
+  },
+  transformer: {
+    ...defaultConfig.transformer,
+    minifierConfig: {
       keep_fnames: true,
+      mangle: {
+        keep_fnames: true,
+      },
     },
   },
 };
 
-module.exports = config;
+module.exports = mergeConfig(defaultConfig, customConfig);
