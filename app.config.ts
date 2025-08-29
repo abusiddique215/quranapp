@@ -6,6 +6,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   slug: 'quran-reader-app',
   scheme: 'quranapp',
   version: '1.0.0',
+  sdkVersion: '53.0.0',
   orientation: 'portrait',
   icon: './assets/icon.png',
   splash: {
@@ -20,6 +21,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ios: {
     supportsTablet: true,
     bundleIdentifier: 'com.abusiddique.quranreader',
+    infoPlist: {
+      ITSAppUsesNonExemptEncryption: false
+    }
   },
   android: {
     adaptiveIcon: {

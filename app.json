@@ -4,6 +4,7 @@
     "slug": "quran-reader-app",
     "owner": "abu.siddique215",
     "version": "1.0.0",
+    "sdkVersion": "53.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -16,7 +17,10 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.abusiddique.quranreader",
-      "buildNumber": "1"
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
