@@ -1,14 +1,16 @@
 import React from 'react';
 import { Pressable, Text, View, ViewStyle, TextStyle } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/theme/theme';
 
 export interface IslamicButtonProps {
   title: string;
   onPress: () => void;
-  variant?: 'primary' | 'secondary' | 'accent' | 'ghost';
+  variant?: 'primary' | 'secondary' | 'accent' | 'ghost' | 'outline';
   size?: 'sm' | 'md' | 'lg';
   disabled?: boolean;
-  icon?: React.ReactNode;
+  icon?: React.ReactNode | string; // Can be a component or icon name
+  subtitle?: string;
   style?: ViewStyle;
   textStyle?: TextStyle;
 }
@@ -20,6 +22,7 @@ export function IslamicButton({
   size = 'md',
   disabled = false,
   icon,
+  subtitle,
   style,
   textStyle
 }: IslamicButtonProps) {
@@ -106,6 +109,18 @@ export function IslamicButton({
             fontWeight: '500' as const,
           },
         };
+      case 'outline':
+        return {
+          container: {
+            backgroundColor: 'transparent',
+            borderWidth: 1,
+            borderColor: colors.accent,
+          },
+          text: {
+            color: colors.accent,
+            fontWeight: '500' as const,
+          },
+        };
       default:
         return {
           container: {},
@@ -124,7 +139,7 @@ export function IslamicButton({
     borderRadius: sizeStyles.borderRadius,
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
-    justifyContent: 'center' as const,
+    justifyContent: subtitle ? 'flex-start' as const : 'center' as const,
     opacity: disabled ? 0.5 : 1,
   };
 
@@ -133,6 +148,30 @@ export function IslamicButton({
     fontSize: sizeStyles.fontSize,
     textAlign: 'center' as const,
     ...textStyle,
+  };
+
+  const renderIcon = () => {
+    if (!icon) return null;
+    
+    const iconSize = size === 'lg' ? 20 : size === 'sm' ? 16 : 18;
+    const iconColor = variantStyles.text.color;
+    
+    if (typeof icon === 'string') {
+      return (
+        <Ionicons 
+          name={icon as any} 
+          size={iconSize} 
+          color={iconColor} 
+          style={{ marginRight: 8 }}
+        />
+      );
+    }
+    
+    return (
+      <View style={{ marginRight: 8 }}>
+        {icon}
+      </View>
+    );
   };
 
   return (
@@ -145,12 +184,23 @@ export function IslamicButton({
       ]}
       disabled={disabled}
     >
-      {icon && (
-        <View style={{ marginRight: 8 }}>
-          {icon}
-        </View>
-      )}
-      <Text style={textStyleCombined}>{title}</Text>
+      {renderIcon()}
+      <View style={{ flex: 1, alignItems: 'center' }}>
+        <Text style={textStyleCombined}>{title}</Text>
+        {subtitle && (
+          <Text style={[
+            textStyleCombined,
+            {
+              fontSize: sizeStyles.fontSize * 0.75,
+              opacity: 0.8,
+              fontWeight: '400',
+              marginTop: 2,
+            }
+          ]}>
+            {subtitle}
+          </Text>
+        )}
+      </View>
     </Pressable>
   );
 }

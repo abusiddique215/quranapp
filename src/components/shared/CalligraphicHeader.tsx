@@ -103,7 +103,7 @@ export function CalligraphicHeader({
               fontWeight: '400',
               textAlign,
               writingDirection: 'rtl',
-              marginBottom: 4,
+              marginBottom: size === 'lg' ? 8 : 6,
             },
           ]}
         >
@@ -118,7 +118,7 @@ export function CalligraphicHeader({
             color: colors.text,
             fontWeight: '700',
             textAlign,
-            marginBottom: subtitle ? 4 : 0,
+            marginBottom: subtitle ? (size === 'lg' ? 6 : 4) : 0,
           },
         ]}
       >
@@ -133,6 +133,7 @@ export function CalligraphicHeader({
               color: colors.textLight,
               fontWeight: '400',
               textAlign,
+              marginTop: 2,
             },
           ]}
         >

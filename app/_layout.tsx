@@ -5,6 +5,7 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import { ThemeProvider } from '@/theme/theme';
 import { ENV } from '@/lib/config/env';
+import { AuthProvider, GuestAuthProvider } from '@/lib/contexts/AuthContext';
 
 // iOS Simulator-safe token cache implementation
 const createTokenCache = () => {
@@ -54,31 +55,49 @@ const createTokenCache = () => {
 };
 
 export default function RootLayout() {
-  const publishableKey = ENV.clerkPublishableKey || 'pk_test_placeholder';
+  const publishableKey = ENV.clerkPublishableKey;
+  const tokenCache = createTokenCache();
   
-  const AppContent = (
-    <ThemeProvider>
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="index" />
-        <Stack.Screen name="read/index" />
-        <Stack.Screen name="auth/sign-in" />
-      </Stack>
-    </ThemeProvider>
-  );
-
-  // Only wrap with Clerk if we have a real key (not placeholder)
-  if (publishableKey && publishableKey !== 'pk_test_placeholder') {
-    const tokenCache = createTokenCache();
-    
+  // Check if we have a valid Clerk publishable key
+  const hasValidClerkKey = publishableKey && publishableKey !== 'pk_test_placeholder' && publishableKey.startsWith('pk_');
+  
+  if (hasValidClerkKey) {
+    // Full app with authentication
     return (
       <ClerkProvider 
         publishableKey={publishableKey} 
         tokenCache={tokenCache as any}
       >
-        {AppContent}
+        <ThemeProvider>
+          <AuthProvider>
+            <Stack screenOptions={{ headerShown: false }}>
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              <Stack.Screen name="index" options={{ headerShown: false }} />
+              <Stack.Screen name="surahs/index" options={{ title: "Quran Chapters" }} />
+              <Stack.Screen name="read/index" />
+              <Stack.Screen name="read/[surah]" options={{ title: "Reading" }} />
+              <Stack.Screen name="auth/sign-in" />
+              <Stack.Screen name="auth/sign-up" />
+              <Stack.Screen name="auth/profile" />
+            </Stack>
+          </AuthProvider>
+        </ThemeProvider>
       </ClerkProvider>
     );
   }
-
-  return AppContent;
+  
+  // Guest-only mode when Clerk is not configured
+  return (
+    <ThemeProvider>
+      <GuestAuthProvider>
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="index" options={{ headerShown: false }} />
+          <Stack.Screen name="surahs/index" options={{ title: "Quran Chapters" }} />
+          <Stack.Screen name="read/index" />
+          <Stack.Screen name="read/[surah]" options={{ title: "Reading" }} />
+        </Stack>
+      </GuestAuthProvider>
+    </ThemeProvider>
+  );
 }

@@ -1,25 +1,21 @@
 import type { AyahPair } from '@/types/quran';
-import { ENV } from '@/lib/config/env';
+import { quranClient } from './quran-client';
 
-// In future, prefer ENV.apiBaseUrl to route via your server function
-const QURAN_API = ENV.apiBaseUrl || 'https://api.quran.com/api/v4';
-
+/**
+ * Get sample Ayah pair for backward compatibility
+ * This function now uses the new Quran API client
+ */
 export async function getSampleAyahPair(): Promise<AyahPair> {
-  // Fetch Al-Fatiha 1:1 in Arabic and a common English translation
   try {
-    const arabicRes = await fetch(`${QURAN_API}/quran/verses/uthmani?chapter_number=1`);
-    const englishRes = await fetch(
-      `${QURAN_API}/quran/translations/131?chapter_number=1` // 131 = Dr. Mustafa Khattab (The Clear Quran)
-    );
-
-    const arabicJson = await arabicRes.json();
-    const englishJson = await englishRes.json();
-
+    // Use the new API client to get Al-Fatihah 1:1
+    return await quranClient.getSampleAyahPair();
+  } catch (error) {
+    console.warn('Failed to get sample ayah pair:', error);
+    
+    // Fallback to hardcoded data
     return {
-      arabic: arabicJson?.verses?.[0]?.text_uthmani ?? '',
-      english: englishJson?.translations?.[0]?.text ?? '',
+      arabic: 'بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ',
+      english: 'In the name of Allah—the Most Compassionate, Most Merciful.',
     };
-  } catch (e) {
-    return { arabic: '', english: '' };
   }
 }

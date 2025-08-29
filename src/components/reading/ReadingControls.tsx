@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, Pressable, Animated } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { View, Text, StyleSheet, Pressable, Animated, Modal, TextInput, Alert } from 'react-native';
 import { useTheme } from '@/theme/theme';
 import { Feather } from '@expo/vector-icons';
 import { PaperTexture } from './PaperTexture';
@@ -13,6 +13,10 @@ interface ReadingControlsProps {
   onFontSizeChange: (size: number) => void;
   onPlayAudio?: () => void;
   isPlaying?: boolean;
+  // Jump-to-verse functionality
+  totalVerses?: number;
+  currentChapter?: number;
+  onJumpToVerse?: (verseNumber: number) => void;
 }
 
 export function ReadingControls({
@@ -24,9 +28,47 @@ export function ReadingControls({
   onFontSizeChange,
   onPlayAudio,
   isPlaying = false,
+  totalVerses = 0,
+  currentChapter = 1,
+  onJumpToVerse,
 }: ReadingControlsProps) {
   const { colors } = useTheme();
   const [showControls, setShowControls] = useState(false);
+  const [showJumpToVerse, setShowJumpToVerse] = useState(false);
+  const [selectedVerse, setSelectedVerse] = useState('');
+
+  // Validation function for verse numbers
+  const validateVerseNumber = useCallback((input: string, maxVerses: number): boolean => {
+    const num = parseInt(input, 10);
+    return !isNaN(num) && num >= 1 && num <= maxVerses;
+  }, []);
+
+  // Handle jump confirmation
+  const handleJumpConfirm = useCallback(() => {
+    if (!onJumpToVerse || !totalVerses) return;
+    
+    if (validateVerseNumber(selectedVerse, totalVerses)) {
+      onJumpToVerse(parseInt(selectedVerse, 10));
+      setShowJumpToVerse(false);
+      setSelectedVerse('');
+      setShowControls(false); // Close settings after jump
+    } else {
+      Alert.alert(
+        'Invalid Verse Number',
+        `Please enter a number between 1 and ${totalVerses}`,
+        [{ text: 'OK', style: 'default' }]
+      );
+    }
+  }, [selectedVerse, totalVerses, onJumpToVerse, validateVerseNumber]);
+
+  // Handle quick jump to specific positions
+  const handleQuickJump = useCallback((verseNumber: number) => {
+    if (!onJumpToVerse) return;
+    
+    onJumpToVerse(verseNumber);
+    setShowJumpToVerse(false);
+    setShowControls(false);
+  }, [onJumpToVerse]);
 
   return (
     <View style={styles.container}>
@@ -180,6 +222,33 @@ export function ReadingControls({
               </View>
             )}
 
+            {/* Jump to Verse Navigation */}
+            {onJumpToVerse && totalVerses > 0 && (
+              <View style={styles.controlRow}>
+                <View style={styles.controlLabelContainer}>
+                  <Feather name="navigation" size={16} color={colors.primary} />
+                  <Text style={[styles.controlLabel, { color: colors.text }]}>
+                    Navigation
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={() => setShowJumpToVerse(true)}
+                  style={[
+                    styles.jumpButton,
+                    { 
+                      backgroundColor: colors.cardWarm, 
+                      borderColor: colors.paperBorder 
+                    }
+                  ]}
+                >
+                  <Feather name="map" size={14} color={colors.text} />
+                  <Text style={[styles.jumpButtonText, { color: colors.text }]}>
+                    Jump to Verse
+                  </Text>
+                </Pressable>
+              </View>
+            )}
+
             {/* Decorative separator */}
             <View style={styles.separatorContainer}>
               <View style={[styles.separator, { backgroundColor: colors.paperBorder }]} />
@@ -205,6 +274,114 @@ export function ReadingControls({
           </View>
         </PaperTexture>
       )}
+
+      {/* Jump to Verse Modal */}
+      <Modal
+        visible={showJumpToVerse}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowJumpToVerse(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <PaperTexture variant="classic" intensity="subtle" style={styles.jumpToVerseModal}>
+            <View style={styles.jumpToVerseContent}>
+              {/* Modal Header */}
+              <View style={styles.modalHeader}>
+                <View style={[styles.headerDecoration, { backgroundColor: colors.accent }]} />
+                <Text style={[styles.modalTitle, { color: colors.primary }]}>
+                  Jump to Verse
+                </Text>
+                <View style={[styles.headerDecoration, { backgroundColor: colors.accent }]} />
+              </View>
+
+              {/* Chapter and verse range info */}
+              <Text style={[styles.modalSubtitle, { color: colors.secondaryText }]}>
+                Chapter {currentChapter} • Verses 1-{totalVerses}
+              </Text>
+
+              {/* Verse input field */}
+              <View style={styles.inputContainer}>
+                <TextInput
+                  style={[
+                    styles.verseInput,
+                    { 
+                      backgroundColor: colors.card,
+                      borderColor: colors.paperBorder,
+                      color: colors.text 
+                    }
+                  ]}
+                  value={selectedVerse}
+                  onChangeText={setSelectedVerse}
+                  keyboardType="numeric"
+                  placeholder="Enter verse number"
+                  placeholderTextColor={colors.secondaryText}
+                  maxLength={3}
+                  selectTextOnFocus={true}
+                  autoFocus={true}
+                />
+              </View>
+
+              {/* Quick jump buttons */}
+              <View style={styles.quickJumpButtons}>
+                <Pressable 
+                  onPress={() => handleQuickJump(1)}
+                  style={[styles.quickJumpButton, { backgroundColor: colors.cardWarm, borderColor: colors.paperBorder }]}
+                >
+                  <Text style={[styles.quickJumpButtonText, { color: colors.text }]}>
+                    First
+                  </Text>
+                </Pressable>
+                <Pressable 
+                  onPress={() => handleQuickJump(Math.floor(totalVerses / 2))}
+                  style={[styles.quickJumpButton, { backgroundColor: colors.cardWarm, borderColor: colors.paperBorder }]}
+                >
+                  <Text style={[styles.quickJumpButtonText, { color: colors.text }]}>
+                    Middle
+                  </Text>
+                </Pressable>
+                <Pressable 
+                  onPress={() => handleQuickJump(totalVerses)}
+                  style={[styles.quickJumpButton, { backgroundColor: colors.cardWarm, borderColor: colors.paperBorder }]}
+                >
+                  <Text style={[styles.quickJumpButtonText, { color: colors.text }]}>
+                    Last
+                  </Text>
+                </Pressable>
+              </View>
+
+              {/* Action buttons */}
+              <View style={styles.modalActions}>
+                <Pressable
+                  onPress={handleJumpConfirm}
+                  style={[
+                    styles.confirmButton,
+                    { 
+                      backgroundColor: colors.accent,
+                      opacity: selectedVerse.trim() ? 1 : 0.5 
+                    }
+                  ]}
+                  disabled={!selectedVerse.trim()}
+                >
+                  <Text style={[styles.confirmButtonText, { color: colors.textOnAccent }]}>
+                    Jump
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    setShowJumpToVerse(false);
+                    setSelectedVerse('');
+                  }}
+                  style={[styles.cancelButton, { backgroundColor: colors.cardWarm, borderColor: colors.paperBorder }]}
+                >
+                  <Text style={[styles.cancelButtonText, { color: colors.text }]}>
+                    Cancel
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          </PaperTexture>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -372,6 +549,125 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '500',
     marginLeft: 8,
+    letterSpacing: 0.2,
+  },
+  
+  // Jump to Verse styles
+  jumpButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 6,
+  },
+  jumpButtonText: {
+    fontSize: 13,
+    fontWeight: '500',
+    letterSpacing: 0.2,
+  },
+  
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  jumpToVerseModal: {
+    width: '100%',
+    maxWidth: 320,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  jumpToVerseContent: {
+    padding: 24,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginHorizontal: 12,
+    textAlign: 'center',
+    letterSpacing: 0.3,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 20,
+    letterSpacing: 0.2,
+  },
+  
+  // Input styles
+  inputContainer: {
+    marginBottom: 20,
+  },
+  verseInput: {
+    height: 48,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    fontSize: 16,
+    fontWeight: '500',
+    textAlign: 'center',
+    letterSpacing: 0.3,
+  },
+  
+  // Quick jump buttons
+  quickJumpButtons: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 24,
+  },
+  quickJumpButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickJumpButtonText: {
+    fontSize: 13,
+    fontWeight: '500',
+    letterSpacing: 0.2,
+  },
+  
+  // Modal action buttons
+  modalActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  confirmButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    letterSpacing: 0.3,
+  },
+  cancelButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    fontWeight: '500',
     letterSpacing: 0.2,
   },
 });
