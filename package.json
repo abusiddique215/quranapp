@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@clerk/clerk-expo": "^2.14.25",
+    "@op-engineering/op-sqlite": "^15.0.1",
     "@react-native-async-storage/async-storage": "^2.2.0",
     "expo": "~53.0.22",
     "expo-auth-session": "^6.2.1",
@@ -26,13 +27,18 @@
     "react-native-safe-area-context": "^5.6.1",
     "react-native-screens": "^4.15.3",
     "react-native-web": "^0.21.1",
-    "zustand": "^5.0.8"
+    "zustand": "^5.0.8",
+    "@shopify/flash-list": "1.7.6"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@types/react": "~19.0.10",
     "babel-plugin-module-resolver": "^5.0.2",
     "typescript": "~5.8.3"
+  },
+  "op-sqlite": {
+    "fts5": true,
+    "performanceMode": true
   },
   "private": true
 }

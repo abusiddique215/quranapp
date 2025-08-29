@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { View, ScrollView, FlatList, StyleSheet, Text, ActivityIndicator, TouchableOpacity, Dimensions } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { StatusBar } from 'expo-status-bar';
 import { useLocalSearchParams, useRouter, Link } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,6 +12,8 @@ import { ReadingControls } from '@/components/reading/ReadingControls';
 import { ChapterHeader } from '@/components/quran/ChapterHeader';
 import { useTheme } from '@/theme/theme';
 import { QuranService } from '@/lib/api/services';
+import { QuranDB } from '@/lib/database/QuranDatabase';
+import { useSurahCache } from '@/lib/hooks/useSurahCache';
 import { useAuthStatus } from '@/lib/contexts/AuthContext';
 import { ErrorBoundary } from '@/components/shared/ErrorBoundary';
 import { 
@@ -49,122 +52,361 @@ export default function ReadSurahScreen() {
   const [error, setError] = useState<string | null>(null);
   const [retryAttempt, setRetryAttempt] = useState(0);
   const [loadingTimeout, setLoadingTimeout] = useState(false);
-  const [useVirtualization, setUseVirtualization] = useState(false);
+  const [useVirtualization, setUseVirtualization] = useState(true); // Always use efficient rendering
   const [targetVerseNumber, setTargetVerseNumber] = useState<number | null>(null);
+  
+  // Zero-delay navigation states - always initialize with valid number
+  const [currentSurahNumber, setCurrentSurahNumber] = useState<number>(1);
+  const [versesLoading, setVersesLoading] = useState(false);
+  
+  // Smart surah caching for instant navigation
+  const { 
+    getCachedSurah, 
+    loadSurahWithCache, 
+    getSurahMetadata,
+    preloadAdjacent,
+    getCacheStats 
+  } = useSurahCache();
 
-  // Scroll references for both ScrollView and FlatList
+  // Scroll references for both ScrollView and FlashList  
   const scrollViewRef = useRef<ScrollView>(null);
-  const flatListRef = useRef<FlatList>(null);
+  const flashListRef = useRef<FlashList<VerseDetails>>(null);
 
-  // Parse surah number from params
-  const surahNumber = parseInt(surahParam || '1', 10);
+  // Safe parameter parsing with validation
+  const surahNumber = useMemo(() => {
+    console.log(`[PARAMS] Raw surahParam:`, surahParam);
+    
+    // Handle undefined/null/empty cases
+    if (!surahParam) {
+      console.log(`[PARAMS] No param provided, defaulting to 1`);
+      return 1;
+    }
+    
+    const parsed = parseInt(surahParam, 10);
+    console.log(`[PARAMS] Parsed number:`, parsed);
+    
+    // Validate range
+    if (isNaN(parsed) || parsed < 1 || parsed > 114) {
+      console.log(`[PARAMS] Invalid number ${parsed}, defaulting to 1`);
+      return 1;
+    }
+    
+    console.log(`[PARAMS] Valid surah number:`, parsed);
+    return parsed;
+  }, [surahParam]);
+  
+  // Sync currentSurahNumber with URL changes
+  useEffect(() => {
+    console.log(`[SYNC] surahNumber: ${surahNumber}, currentSurahNumber: ${currentSurahNumber}`);
+    if (surahNumber && surahNumber !== currentSurahNumber) {
+      console.log(`[SYNC] Updating currentSurahNumber to ${surahNumber}`);
+      setCurrentSurahNumber(surahNumber);
+    }
+  }, [surahNumber, currentSurahNumber]);
   
   // Validate surah number
   const isValidSurah = surahNumber >= 1 && surahNumber <= 114;
 
+  // Bismillah text constant
+  const BISMILLAH_ARABIC = 'بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ';
+
+  /**
+   * Clean verse data to separate Bismillah from actual verse content
+   * According to Islamic scholarship, Bismillah appears before verses (not as part of them)
+   * except in Al-Fatihah where it is verse 1, and At-Tawbah which has no Bismillah
+   */
+  // Huroof Muqatta'at (Mysterious Letters) lookup for surahs that begin with them
+  const HUROOF_MUQATTAAT = {
+    2: 'الم',          // Al-Baqarah
+    3: 'الم',          // Aal-i-Imraan  
+    7: 'المص',         // Al-A'raf
+    10: 'الر',         // Yunus
+    11: 'الر',         // Hud
+    12: 'الر',         // Yusuf
+    13: 'المر',        // Ar-Ra'd
+    14: 'الر',         // Ibrahim
+    15: 'الر',         // Al-Hijr
+    19: 'كهيعص',       // Maryam
+    20: 'طه',          // Ta-Ha
+    26: 'طسم',         // Ash-Shu'ara
+    27: 'طس',          // An-Naml
+    28: 'طسم',         // Al-Qasas
+    29: 'الم',         // Al-Ankabut
+    30: 'الم',         // Ar-Rum
+    31: 'الم',         // Luqman
+    32: 'الم',         // As-Sajdah
+    36: 'يس',          // Ya-Sin
+    38: 'ص',           // Sad
+    40: 'حم',          // Ghafir
+    41: 'حم',          // Fussilat
+    42: 'حم عسق',      // Ash-Shura
+    43: 'حم',          // Az-Zukhruf
+    44: 'حم',          // Ad-Dukhan
+    45: 'حم',          // Al-Jathiyah
+    46: 'حم',          // Al-Ahqaf
+    50: 'ق',           // Qaf
+    68: 'ن'            // Al-Qalam
+  };
+
+  const cleanVerseData = useCallback((verses: any[]) => {
+    if (!verses || verses.length === 0) return verses;
+    
+    console.log(`[DEBUG] Processing surah ${surahNumber}, verses count:`, verses.length);
+    
+    // For surahs other than Al-Fatihah (1) and At-Tawbah (9)
+    if (surahNumber !== 1 && surahNumber !== 9 && verses[0]) {
+      const firstVerse = verses[0];
+      const arabicText = firstVerse.ayah?.text || '';
+      const translationText = firstVerse.translations?.[0]?.text || '';
+      const transliterationText = firstVerse.transliteration?.text || '';
+      
+      console.log(`[DEBUG] Original verse 1 Arabic text:`, arabicText);
+      console.log(`[DEBUG] Original verse 1 translation:`, translationText);
+      
+      // Special handling for surahs with Huroof Muqatta'at
+      if (HUROOF_MUQATTAAT[surahNumber]) {
+        const expectedText = HUROOF_MUQATTAAT[surahNumber];
+        console.log(`[DEBUG] Expected Huroof Muqatta'at for surah ${surahNumber}:`, expectedText);
+        
+        // For these surahs, verse 1 should be only the mysterious letters
+        const cleanedArabic = expectedText;
+        
+        // Clean up translation to only show the transliteration
+        const cleanedTranslation = translationText
+          .replace(/In the name of Allah[^.]*\./g, '')  // Remove Bismillah variations
+          .replace(/بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ/g, '') // Remove Arabic Bismillah
+          .trim();
+        
+        console.log(`[DEBUG] Cleaned Arabic text:`, cleanedArabic);
+        console.log(`[DEBUG] Cleaned translation:`, cleanedTranslation);
+        
+        return verses.map((verse, index) => {
+          if (index === 0) {
+            return {
+              ...verse,
+              ayah: {
+                ...verse.ayah,
+                text: cleanedArabic
+              },
+              translations: verse.translations?.map((trans: any) => ({
+                ...trans,
+                text: cleanedTranslation || trans.text.replace(/.*\. */, '') // Keep only the part after Bismillah
+              })) || [],
+              transliteration: verse.transliteration ? {
+                ...verse.transliteration,
+                text: verse.transliteration.text.replace('Meeem', 'Meem')
+              } : undefined
+            };
+          }
+          return verse;
+        });
+      }
+      
+      // Fallback: Check if first verse contains Bismillah using various patterns
+      const bismillahPatterns = [
+        BISMILLAH_ARABIC,
+        'بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ',
+        'بِسۡمِ اللَّهِ الرَّحۡمَٰنِ الرَّحِيمِ'  // Alternative Unicode
+      ];
+      
+      let foundBismillah = false;
+      let cleanedArabic = arabicText;
+      
+      for (const pattern of bismillahPatterns) {
+        if (arabicText.includes(pattern)) {
+          foundBismillah = true;
+          cleanedArabic = arabicText.replace(pattern, '').trim();
+          break;
+        }
+      }
+      
+      if (foundBismillah) {
+        console.log(`[DEBUG] Found Bismillah, cleaned Arabic:`, cleanedArabic);
+        
+        // Remove common Bismillah translations from English
+        const bismillahTranslations = [
+          'In the name of Allah—the Most Compassionate, Most Merciful.',
+          'In the name of Allah, the Most Gracious, the Most Merciful.',
+          'In the name of Allah, the Beneficent, the Merciful.',
+          'In the name of God, the Most Gracious, the Most Merciful.'
+        ];
+        
+        let cleanedTranslation = translationText;
+        for (const bismillahTrans of bismillahTranslations) {
+          cleanedTranslation = cleanedTranslation.replace(bismillahTrans, '').trim();
+        }
+        
+        // Fix transliteration: "Alif-Laam-Meeem" → "Alif-Laam-Meem"
+        let cleanedTransliteration = transliterationText;
+        cleanedTransliteration = cleanedTransliteration.replace('Meeem', 'Meem');
+        
+        console.log(`[DEBUG] Final cleaned Arabic:`, cleanedArabic);
+        console.log(`[DEBUG] Final cleaned translation:`, cleanedTranslation);
+        
+        // Update the first verse with cleaned content
+        return verses.map((verse, index) => {
+          if (index === 0) {
+            return {
+              ...verse,
+              ayah: {
+                ...verse.ayah,
+                text: cleanedArabic
+              },
+              translations: verse.translations?.map((trans: any) => ({
+                ...trans,
+                text: cleanedTranslation
+              })) || [],
+              transliteration: verse.transliteration ? {
+                ...verse.transliteration,
+                text: cleanedTransliteration
+              } : undefined
+            };
+          }
+          return verse;
+        });
+      }
+      
+      // Also fix transliteration typo even if no Bismillah separation needed
+      return verses.map((verse) => ({
+        ...verse,
+        transliteration: verse.transliteration ? {
+          ...verse.transliteration,
+          text: verse.transliteration.text.replace('Meeem', 'Meem')
+        } : undefined
+      }));
+    }
+    
+    return verses;
+  }, [surahNumber]);
+
   useEffect(() => {
     if (!isValidSurah) return;
 
-    let isMounted = true;
-    let timeoutId: NodeJS.Timeout;
+    console.log(`[EFFECT] Loading surah ${currentSurahNumber} with instant cache system`);
+    
+    // Use the instant loading system for initial load too
+    setLoading(true);
+    setVersesLoading(true);
+    
+    loadSurahInstant(currentSurahNumber).finally(() => {
+      setLoading(false);
+    });
+    
+  }, [currentSurahNumber, retryAttempt, isValidSurah, loadSurahInstant]);
 
-    const loadSurahData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        setLoadingTimeout(false);
-
-        // Set timeout for loading
-        timeoutId = setTimeout(() => {
-          if (isMounted) {
-            setLoadingTimeout(true);
-          }
-        }, 10000); // 10 second timeout
-
-        // Load surah with translation and timeout
-        const loadWithTimeout = <T>(promise: Promise<T>, timeoutMs: number = 8000): Promise<T> => {
-          return Promise.race([
-            promise,
-            new Promise<T>((_, reject) => 
-              setTimeout(() => reject(new Error(`Request timeout after ${timeoutMs}ms`)), timeoutMs)
-            )
-          ]);
-        };
-
-        const data = await loadWithTimeout(QuranService.getSurah(surahNumber, 'en.sahih'));
-        
-        if (!isMounted) return;
-
-        // Clear timeout if successful
-        if (timeoutId) {
-          clearTimeout(timeoutId);
-        }
-
-        setSurahData(data);
-        
-        // Enable virtualization for long surahs (>100 verses) for memory efficiency
-        if (data.ayahs.length > 100) {
-          setUseVirtualization(true);
-        }
-        
-        // Save last accessed verse (optional)
-        QuranService.saveLastAccessedVerse(surahNumber, 1).catch(console.warn);
-      } catch (err) {
-        console.error('Error loading Surah data:', err);
-        
-        if (!isMounted) return;
-        
-        // Determine error type
-        const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-        const isNetworkError = errorMessage.includes('Network') || 
-                              errorMessage.includes('fetch') ||
-                              errorMessage.includes('timeout');
-        
-        setError(isNetworkError ? 'network' : 'api');
-        
-        // For Al-Fatihah, try fallback data
-        if (surahNumber === 1) {
-          try {
-            const fallbackData = await QuranService.getAlFatihah();
-            setSurahData(fallbackData);
-            setError(null);
-          } catch (fallbackError) {
-            console.error('Fallback also failed:', fallbackError);
-          }
-        }
-      } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
-        if (timeoutId) {
-          clearTimeout(timeoutId);
-        }
-      }
-    };
-
-    loadSurahData();
-
-    return () => {
-      isMounted = false;
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
-    };
-  }, [surahNumber, retryAttempt, isValidSurah]);
-
-  // Navigation functions
+  // Zero-delay navigation functions
   const handlePreviousSurah = useCallback(() => {
-    if (surahNumber > 1) {
-      router.replace(`/read/${surahNumber - 1}`);
+    // Safety check: ensure we have a valid current surah number
+    if (!currentSurahNumber || isNaN(currentSurahNumber)) {
+      console.error(`[Navigation] Invalid currentSurahNumber: ${currentSurahNumber}`);
+      return;
     }
-  }, [surahNumber, router]);
+    
+    const targetSurah = currentSurahNumber - 1;
+    if (targetSurah >= 1) {
+      console.log(`[Navigation] Instant navigation to surah ${targetSurah}`);
+      
+      // 1. INSTANT UI UPDATE - Zero delay perception
+      setCurrentSurahNumber(targetSurah);
+      setVersesLoading(true);
+      
+      // 2. Update URL without full reload (shallow routing)
+      router.replace(`/read/${targetSurah}`, undefined, { shallow: true });
+      
+      // 3. Load data in background (non-blocking)
+      setTimeout(() => {
+        loadSurahInstant(targetSurah);
+      }, 0);
+    }
+  }, [currentSurahNumber, router, loadSurahInstant]);
 
   const handleNextSurah = useCallback(() => {
-    if (surahNumber < 114) {
-      router.replace(`/read/${surahNumber + 1}`);
+    // Safety check: ensure we have a valid current surah number
+    if (!currentSurahNumber || isNaN(currentSurahNumber)) {
+      console.error(`[Navigation] Invalid currentSurahNumber: ${currentSurahNumber}`);
+      return;
     }
-  }, [surahNumber, router]);
+    
+    const targetSurah = currentSurahNumber + 1;
+    if (targetSurah <= 114) {
+      console.log(`[Navigation] Instant navigation to surah ${targetSurah}`);
+      
+      // 1. INSTANT UI UPDATE - Zero delay perception  
+      setCurrentSurahNumber(targetSurah);
+      setVersesLoading(true);
+      
+      // 2. Update URL without full reload (shallow routing)
+      router.replace(`/read/${targetSurah}`, undefined, { shallow: true });
+      
+      // 3. Load data in background (non-blocking)
+      setTimeout(() => {
+        loadSurahInstant(targetSurah);
+      }, 0);
+    }
+  }, [currentSurahNumber, router, loadSurahInstant]);
 
+  // Instant surah loading with cache-first approach
+  const loadSurahInstant = useCallback(async (targetSurahNumber: number) => {
+    // Safety check: ensure we have a valid surah number
+    if (!targetSurahNumber || isNaN(targetSurahNumber) || targetSurahNumber < 1 || targetSurahNumber > 114) {
+      console.error(`[LoadInstant] Invalid surah number: ${targetSurahNumber}, aborting load`);
+      setError('api');
+      setVersesLoading(false);
+      return;
+    }
+    
+    try {
+      console.log(`[LoadInstant] Loading surah ${targetSurahNumber} with cache-first approach`);
+      
+      // Check cache first for instant response
+      const cachedData = getCachedSurah(targetSurahNumber);
+      if (cachedData) {
+        console.log(`[LoadInstant] Using cached data for surah ${targetSurahNumber}`);
+        
+        // Apply Islamic accuracy cleaning
+        const cleanedData = {
+          ...cachedData,
+          ayahs: cleanVerseData(cachedData.ayahs)
+        };
+        
+        setSurahData(cleanedData);
+        setVersesLoading(false);
+        setError(null);
+        
+        // Preload adjacent chapters in background
+        preloadAdjacent(targetSurahNumber);
+        return;
+      }
+      
+      // Load from database/API with high priority
+      console.log(`[LoadInstant] Loading surah ${targetSurahNumber} from database/API`);
+      const data = await loadSurahWithCache(targetSurahNumber, 'high');
+      
+      if (data) {
+        // Apply Islamic accuracy cleaning
+        const cleanedData = {
+          ...data,
+          ayahs: cleanVerseData(data.ayahs)
+        };
+        
+        setSurahData(cleanedData);
+        setError(null);
+        console.log(`[LoadInstant] Successfully loaded surah ${targetSurahNumber} with ${cleanedData.ayahs.length} verses`);
+        
+        // Preload adjacent chapters in background
+        preloadAdjacent(targetSurahNumber);
+      } else {
+        setError('api');
+        console.error(`[LoadInstant] Failed to load surah ${targetSurahNumber}`);
+      }
+      
+    } catch (error) {
+      console.error(`[LoadInstant] Error loading surah ${targetSurahNumber}:`, error);
+      setError('api');
+    } finally {
+      setVersesLoading(false);
+    }
+  }, [getCachedSurah, loadSurahWithCache, preloadAdjacent, cleanVerseData]);
 
   const handleRetryData = useCallback(() => {
     setRetryAttempt(prev => prev + 1);
@@ -180,10 +422,10 @@ export default function ReadSurahScreen() {
 
     const targetIndex = verseNumber - 1;
     
-    if (useVirtualization && flatListRef.current) {
-      // For FlatList (virtualized long surahs like Al-Baqarah)
+    if (useVirtualization && flashListRef.current) {
+      // For FlashList (virtualized long surahs like Al-Baqarah)
       try {
-        flatListRef.current.scrollToIndex({
+        flashListRef.current.scrollToIndex({
           index: targetIndex,
           animated: true,
           viewPosition: 0.15, // Show verse slightly below top for better visibility
@@ -196,7 +438,7 @@ export default function ReadSurahScreen() {
         const HEADER_HEIGHT = 120;
         const targetY = HEADER_HEIGHT + (targetIndex === 0 ? 0 : BISMILLAH_HEIGHT) + (targetIndex * ESTIMATED_VERSE_HEIGHT);
         
-        flatListRef.current.scrollToOffset({
+        flashListRef.current.scrollToOffset({
           offset: Math.max(0, targetY),
           animated: true,
         });
@@ -247,13 +489,29 @@ export default function ReadSurahScreen() {
         <View style={[styles.bismillahContainer, { 
           borderColor: colors.accent,
         }]}>
+          {/* Top decorative line */}
           <View style={[styles.bismillahDecoration, { backgroundColor: colors.accent }]} />
+          
+          {/* Ornamental flourishes */}
+          <View style={styles.bismillahOrnaments}>
+            <Text style={[styles.bismillahOrnament, { color: colors.accent }]}>❋</Text>
+            <View style={[styles.bismillahDivider, { backgroundColor: colors.accent }]} />
+            <Text style={[styles.bismillahOrnament, { color: colors.accent }]}>❋</Text>
+          </View>
+          
           <Text style={[styles.bismillahText, { color: colors.text }]}>
             بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ
           </Text>
           <Text style={[styles.bismillahTranslation, { color: colors.secondaryText }]}>
             In the name of Allah—the Most Compassionate, Most Merciful.
           </Text>
+          
+          {/* Bottom ornamental flourishes */}
+          <View style={[styles.bismillahOrnaments, { marginTop: 12 }]}>
+            <Text style={[styles.bismillahOrnament, { color: colors.accent }]}>❋</Text>
+            <View style={[styles.bismillahDivider, { backgroundColor: colors.accent }]} />
+            <Text style={[styles.bismillahOrnament, { color: colors.accent }]}>❋</Text>
+          </View>
         </View>
       )}
 
@@ -302,8 +560,8 @@ export default function ReadSurahScreen() {
     const { index, averageItemLength } = info;
     const targetY = index * averageItemLength;
     
-    if (flatListRef.current) {
-      flatListRef.current.scrollToOffset({
+    if (flashListRef.current) {
+      flashListRef.current.scrollToOffset({
         offset: targetY,
         animated: true,
       });
@@ -407,8 +665,11 @@ export default function ReadSurahScreen() {
     );
   }
 
-  const isFirstSurah = surahNumber === 1;
-  const isLastSurah = surahNumber === 114;
+  const isFirstSurah = currentSurahNumber === 1;
+  const isLastSurah = currentSurahNumber === 114;
+  
+  // Get instant metadata for zero-delay UI updates
+  const currentMetadata = getSurahMetadata(currentSurahNumber);
 
   return (
     <ErrorBoundary>
@@ -457,19 +718,26 @@ export default function ReadSurahScreen() {
             <View style={styles.surahNavigation}>
               <TouchableOpacity
                 onPress={handlePreviousSurah}
-                disabled={isFirstSurah}
+                disabled={false} // Never disable for zero-delay navigation
                 style={[styles.navButton, { opacity: isFirstSurah ? 0.3 : 1 }]}
               >
                 <Ionicons name="chevron-back" size={20} color={colors.accent} />
               </TouchableOpacity>
 
-              <Text style={[styles.surahIndicator, { color: colors.text }]}>
-                {surahNumber} / 114
-              </Text>
+              <View style={styles.surahIndicatorContainer}>
+                <Text style={[styles.surahIndicator, { color: colors.text }]}>
+                  {currentSurahNumber} / 114
+                </Text>
+                {currentMetadata && (
+                  <Text style={[styles.surahName, { color: colors.secondaryText }]}>
+                    {currentMetadata.englishName}
+                  </Text>
+                )}
+              </View>
 
               <TouchableOpacity
                 onPress={handleNextSurah}
-                disabled={isLastSurah}
+                disabled={false} // Never disable for zero-delay navigation
                 style={[styles.navButton, { opacity: isLastSurah ? 0.3 : 1 }]}
               >
                 <Ionicons name="chevron-forward" size={20} color={colors.accent} />
@@ -478,37 +746,43 @@ export default function ReadSurahScreen() {
           </View>
         </View>
 
-        {/* Chapter Header - Compact Version */}
-        <ChapterHeader surah={surahData.surah} compact={true} />
+        {/* Chapter Header - Instant or Loading */}
+        {surahData ? (
+          <ChapterHeader surah={surahData.surah} compact={true} />
+        ) : currentMetadata ? (
+          <View style={[styles.headerContainer, { backgroundColor: colors.background }]}>
+            <Text style={[styles.loadingHeaderTitle, { color: colors.text }]}>
+              {currentMetadata.name}
+            </Text>
+            <Text style={[styles.loadingHeaderSubtitle, { color: colors.secondaryText }]}>
+              {currentMetadata.englishName}
+            </Text>
+            {versesLoading && (
+              <ActivityIndicator size="small" color={colors.accent} style={{ marginTop: 8 }} />
+            )}
+          </View>
+        ) : null}
 
         {/* Reading Content - Unified Scrollable View */}
-        {useVirtualization && surahData.ayahs.length > 100 ? (
+        {useVirtualization ? (
           // Virtualized list for very long surahs (memory efficient)
-          <FlatList
-            ref={flatListRef}
-            data={surahData.ayahs}
-            renderItem={renderVerseItem}
-            keyExtractor={verseKeyExtractor}
-            getItemLayout={getVerseItemLayout}
-            onScrollToIndexFailed={handleScrollToIndexFailed}
-            style={styles.scrollView}
-            contentContainerStyle={styles.scrollContent}
-            showsVerticalScrollIndicator={false}
-            // Enhanced performance optimizations
-            initialNumToRender={15}
-            maxToRenderPerBatch={10}
-            updateCellsBatchingPeriod={50}
-            windowSize={10}
-            removeClippedSubviews={true}
-            // Smooth scrolling enhancements
-            scrollEventThrottle={16}
-            decelerationRate="normal"
-            bounces={true}
-            alwaysBounceVertical={false}
-            // Memory management
-            legacyImplementation={false}
-            disableVirtualization={false}
-          />
+          <>
+            {console.log(`[FLASHLIST] Rendering ${surahData.ayahs.length} verses in FlashList with virtualization`) || null}
+            <FlashList
+              ref={flashListRef}
+              data={surahData.ayahs}
+              renderItem={renderVerseItem}
+              keyExtractor={verseKeyExtractor}
+              estimatedItemSize={180} // Average verse height for FlashList performance
+              onScrollToIndexFailed={handleScrollToIndexFailed}
+              showsVerticalScrollIndicator={false}
+              // FlashList optimizations for smooth Quran reading
+              drawDistance={400} // Render ahead distance for smooth scrolling
+              // Smooth scrolling enhancements
+              bounces={true}
+              alwaysBounceVertical={false}
+            />
+          </>
         ) : (
           // ScrollView for most surahs - Full content visible
           <ScrollView 
@@ -527,17 +801,34 @@ export default function ReadSurahScreen() {
               <View style={[styles.bismillahContainer, { 
                 borderColor: colors.accent,
               }]}>
+                {/* Top decorative line */}
                 <View style={[styles.bismillahDecoration, { backgroundColor: colors.accent }]} />
+                
+                {/* Ornamental flourishes */}
+                <View style={styles.bismillahOrnaments}>
+                  <Text style={[styles.bismillahOrnament, { color: colors.accent }]}>❋</Text>
+                  <View style={[styles.bismillahDivider, { backgroundColor: colors.accent }]} />
+                  <Text style={[styles.bismillahOrnament, { color: colors.accent }]}>❋</Text>
+                </View>
+                
                 <Text style={[styles.bismillahText, { color: colors.text }]}>
                   بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ
                 </Text>
                 <Text style={[styles.bismillahTranslation, { color: colors.secondaryText }]}>
                   In the name of Allah—the Most Compassionate, Most Merciful.
                 </Text>
+                
+                {/* Bottom ornamental flourishes */}
+                <View style={[styles.bismillahOrnaments, { marginTop: 12 }]}>
+                  <Text style={[styles.bismillahOrnament, { color: colors.accent }]}>❋</Text>
+                  <View style={[styles.bismillahDivider, { backgroundColor: colors.accent }]} />
+                  <Text style={[styles.bismillahOrnament, { color: colors.accent }]}>❋</Text>
+                </View>
               </View>
             )}
 
             {/* All Verses */}
+            {console.log(`[RENDER] Rendering ${surahData.ayahs.length} verses in ScrollView`) || null}
             {surahData.ayahs.map((verse, index) => (
               <View key={`verse-${verse.ayah.numberInSurah}`} style={styles.verseContainer}>
                 <VerseDivider ayahNumber={verse.ayah.numberInSurah} />
@@ -655,10 +946,30 @@ const styles = StyleSheet.create({
   navButton: {
     padding: 8,
   },
-  surahIndicator: {
+  surahIndicatorContainer: {
+    alignItems: 'center',
     marginHorizontal: 16,
+  },
+  surahIndicator: {
     fontSize: 14,
     fontWeight: '600',
+    textAlign: 'center',
+  },
+  surahName: {
+    fontSize: 10,
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  loadingHeaderTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  loadingHeaderSubtitle: {
+    fontSize: 16,
+    textAlign: 'center',
+    fontStyle: 'italic',
   },
   scrollView: {
     flex: 1,
@@ -673,35 +984,70 @@ const styles = StyleSheet.create({
   },
   bismillahContainer: {
     position: 'relative',
-    marginHorizontal: 12,
-    marginBottom: 32,
-    paddingTop: 16,
-    paddingBottom: 16,
-    paddingHorizontal: 16,
-    borderTopWidth: 3,
-    borderBottomWidth: 1,
-    backgroundColor: 'transparent',
+    marginHorizontal: 16,
+    marginVertical: 32,
+    paddingVertical: 24,
+    paddingHorizontal: 20,
+    borderRadius: 16,
+    backgroundColor: 'rgba(46, 125, 50, 0.05)', // Soft Islamic green background
+    borderWidth: 2,
+    borderStyle: 'solid',
     alignItems: 'center',
+    // Add subtle shadow for depth
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3, // Android shadow
   },
   bismillahDecoration: {
     position: 'absolute',
-    top: -1,
-    left: '25%',
-    right: '25%',
-    height: 8,
-    borderRadius: 4,
-    opacity: 0.4,
+    top: -2,
+    left: '20%',
+    right: '20%',
+    height: 4,
+    borderRadius: 2,
+    opacity: 0.6,
   },
   bismillahText: {
-    fontSize: 20,
-    fontWeight: '600',
+    fontSize: 24,
+    fontWeight: '700',
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: 12,
+    lineHeight: 36,
+    // Add letter spacing for Arabic text elegance
+    letterSpacing: 1,
+    // Ensure proper Arabic text rendering
+    writingDirection: 'rtl',
   },
   bismillahTranslation: {
-    fontSize: 14,
+    fontSize: 15,
     textAlign: 'center',
     fontStyle: 'italic',
+    fontWeight: '500',
+    lineHeight: 20,
+    opacity: 0.9,
+    marginTop: 4,
+  },
+  bismillahOrnaments: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 8,
+  },
+  bismillahOrnament: {
+    fontSize: 16,
+    fontWeight: '400',
+    marginHorizontal: 8,
+    opacity: 0.7,
+  },
+  bismillahDivider: {
+    height: 1,
+    width: 40,
+    opacity: 0.5,
   },
   verseMetadata: {
     marginTop: 16,
