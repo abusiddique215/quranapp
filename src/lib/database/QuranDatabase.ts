@@ -105,10 +105,14 @@ class QuranDatabaseService {
       // Create tables if they don't exist
       await this.createTables();
 
-      // Check if database is populated
+      // Check if database is populated and populate if needed
       const stats = await this.getStats();
       if (!stats.isPopulated) {
-        console.log('[QuranDB] Database not populated, will populate on first use');
+        console.log('[QuranDB] Database not populated, populating now with complete Quran...');
+        await this.populateDatabase();
+        console.log('[QuranDB] Database population completed during initialization');
+      } else {
+        console.log(`[QuranDB] Database already populated with ${stats.totalSurahs} surahs and ${stats.totalVerses} verses`);
       }
 
       this.isInitialized = true;
